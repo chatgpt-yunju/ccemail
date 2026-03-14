@@ -273,9 +273,12 @@ def _truncate(text: str, max_len: int = 200) -> str:
 def _clean_markdown(text: str) -> str:
     """Convert standard Markdown to Lark card compatible subset.
 
-    Lark card markdown only supports: **bold**, *italic*, ~~strike~~,
-    [link](url), `inline code`, and \\n line breaks.
-    Does NOT support: # headings, tables, code blocks, lists, blockquotes.
+    Lark card markdown supports:
+      **bold**, *italic*, ~~strike~~, [link](url), `inline code`,
+      <font color='red/green/grey'>colored text</font>
+
+    Does NOT support:
+      # headings, tables, code blocks, ordered/unordered lists, blockquotes
     """
     import re
 
@@ -287,10 +290,9 @@ def _clean_markdown(text: str) -> str:
         # Toggle code blocks (``` ... ```)
         if line.strip().startswith("```"):
             in_code_block = not in_code_block
-            continue  # skip the ``` delimiter lines
+            continue  # skip delimiter
 
         if in_code_block:
-            # Wrap code lines in inline code if short enough
             stripped = line.rstrip()
             if stripped:
                 out.append(f"`{stripped}`")
@@ -298,25 +300,41 @@ def _clean_markdown(text: str) -> str:
                 out.append("")
             continue
 
-        # Convert headings: ### Title → **Title**
+        # Headings → bold (with color for emphasis)
         heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
         if heading_match:
-            out.append(f"**{heading_match.group(2).strip()}**")
+            level = len(heading_match.group(1))
+            title = heading_match.group(2).strip()
+            if level <= 2:
+                out.append(f"<font color='green'>**{title}**</font>")
+            else:
+                out.append(f"**{title}**")
             continue
 
-        # Convert blockquotes: > text → text
+        # Table separator lines (|------|------| ) → skip
+        if re.match(r'^\s*\|[\s:]*[-]+[\s:]*(\|[\s:]*[-]+[\s:]*)*\|\s*$', line):
+            continue
+
+        # Table rows: | A | B | C | → A | B | C (strip outer pipes)
+        table_match = re.match(r'^\s*\|(.+)\|\s*$', line)
+        if table_match:
+            cells = [c.strip() for c in table_match.group(1).split("|")]
+            out.append("  ".join(cells))
+            continue
+
+        # Blockquotes → italic
         if line.startswith("> "):
-            out.append(line[2:])
+            out.append(f"*{line[2:]}*")
             continue
 
-        # Convert list items: - item → • item
+        # Unordered list items → bullet
         list_match = re.match(r'^(\s*)[-*]\s+(.+)$', line)
         if list_match:
             indent = "  " * (len(list_match.group(1)) // 2)
             out.append(f"{indent}• {list_match.group(2)}")
             continue
 
-        # Convert numbered lists: 1. item → 1. item (keep as-is, readable)
+        # Everything else: keep as-is
         out.append(line)
 
     return "\n".join(out)
