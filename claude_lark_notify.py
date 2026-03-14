@@ -115,6 +115,9 @@ def _parse_transcript(path: str) -> dict:
         "total_output_tokens": 0,
         "total_tool_calls": 0,
         "total_turns": 0,
+        "total_agents": 0,
+        "agents": [],          # all agents in session
+        "turn_agents": [],     # agents spawned since last user msg
         "last_user_ts": None,
         "model": "",
         "git_branch": "",
@@ -140,6 +143,7 @@ def _parse_transcript(path: str) -> dict:
                     stats["total_turns"] += 1
                     if ts and obj.get("userType") == "external":
                         stats["last_user_ts"] = ts
+                        stats["turn_agents"] = []  # reset per turn
 
                 if record_type == "assistant" and isinstance(obj.get("message"), dict):
                     msg = obj["message"]
@@ -153,10 +157,22 @@ def _parse_transcript(path: str) -> dict:
 
                     content = msg.get("content", [])
                     if isinstance(content, list):
-                        stats["total_tool_calls"] += sum(
-                            1 for c in content
-                            if isinstance(c, dict) and c.get("type") == "tool_use"
-                        )
+                        for c in content:
+                            if not isinstance(c, dict):
+                                continue
+                            if c.get("type") == "tool_use":
+                                stats["total_tool_calls"] += 1
+                                # Track Agent tool calls
+                                if c.get("name") == "Agent":
+                                    inp = c.get("input", {})
+                                    agent_info = {
+                                        "desc": inp.get("description", ""),
+                                        "type": inp.get("subagent_type", ""),
+                                        "name": inp.get("name", ""),
+                                    }
+                                    stats["total_agents"] += 1
+                                    stats["agents"].append(agent_info)
+                                    stats["turn_agents"].append(agent_info)
     except (FileNotFoundError, OSError):
         pass
     return stats
@@ -433,6 +449,26 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
 
     if stats_cols:
         elements.append(_columns(stats_cols))
+
+    # ── Sub-agents ──
+    turn_agents = stats.get("turn_agents", [])
+    total_agents = stats.get("total_agents", 0)
+    if turn_agents:
+        agent_lines = []
+        for a in turn_agents:
+            label = a.get("name") or a.get("type") or "agent"
+            desc = a.get("desc", "")
+            if desc:
+                agent_lines.append(f"• **{label}**  {desc}")
+            else:
+                agent_lines.append(f"• **{label}**")
+        header = f"🤖 **子 Agent** ({len(turn_agents)}"
+        if total_agents > len(turn_agents):
+            header += f" / 本会话共 {total_agents}"
+        header += ")"
+        elements.append({"tag": "markdown", "content": header + "\n" + "\n".join(agent_lines)})
+    elif total_agents > 0:
+        elements.append({"tag": "markdown", "content": f"🤖 **子 Agent**  本会话共 {total_agents} 个"})
 
     # ── Git last commit ──
     last_commit = git.get("last_commit", "")
