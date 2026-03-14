@@ -2,27 +2,17 @@
 """Claude Code → Lark (飞书) notification hook.
 
 Zero external dependencies — uses only Python stdlib.
-Reads Claude Code hook event from stdin, sends a rich interactive card
-to the configured Lark user via Bot API.
+Reads Claude Code hook event from stdin, parses the session transcript
+for rich stats, and sends an interactive card to the configured Lark user.
 
-Usage:
-    Configured as a Claude Code hook in ~/.claude/settings.json.
-    Receives JSON on stdin from Claude Code Stop / Notification events.
-
-Config:
-    ~/.config/claude-lark/config.json
-    {
-        "app_id": "cli_xxx",
-        "app_secret": "xxx",
-        "open_id": "ou_xxx",
-        "events": ["Stop", "Notification"]
-    }
+Config: ~/.config/claude-lark/config.json
 """
 
 from __future__ import annotations
 
 import json
 import platform
+import subprocess
 import sys
 import time
 import urllib.error
@@ -43,9 +33,8 @@ LARK_MESSAGE_URL = "https://open.feishu.cn/open-apis/im/v1/messages"
 
 # ── Constants ────────────────────────────────────────────────────────
 HTTP_TIMEOUT = 10
-TOKEN_REFRESH_BUFFER = 300  # refresh 5 min before expiry
+TOKEN_REFRESH_BUFFER = 300
 DEFAULT_EVENTS = ["Stop", "Notification"]
-
 
 # ── Config & stdin ───────────────────────────────────────────────────
 
@@ -97,10 +86,8 @@ def _save_token_cache(token: str, expires_in: int) -> None:
 def _fetch_tenant_token(app_id: str, app_secret: str) -> str | None:
     payload = json.dumps({"app_id": app_id, "app_secret": app_secret}).encode()
     req = urllib.request.Request(
-        LARK_TOKEN_URL,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
+        LARK_TOKEN_URL, data=payload,
+        headers={"Content-Type": "application/json"}, method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
@@ -117,6 +104,147 @@ def _fetch_tenant_token(app_id: str, app_secret: str) -> str | None:
 
 def get_token(app_id: str, app_secret: str) -> str | None:
     return _get_cached_token() or _fetch_tenant_token(app_id, app_secret)
+
+
+# ── Transcript parsing ──────────────────────────────────────────────
+
+
+def _parse_transcript(path: str) -> dict:
+    """Parse session transcript JSONL for rich statistics."""
+    stats = {
+        "total_output_tokens": 0,
+        "total_tool_calls": 0,
+        "total_turns": 0,
+        "last_user_ts": None,
+        "model": "",
+        "git_branch": "",
+    }
+    if not path:
+        return stats
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                gb = obj.get("gitBranch")
+                if gb:
+                    stats["git_branch"] = gb
+
+                record_type = obj.get("type")
+                ts = obj.get("timestamp")
+
+                if record_type == "user":
+                    stats["total_turns"] += 1
+                    if ts and obj.get("userType") == "external":
+                        stats["last_user_ts"] = ts
+
+                if record_type == "assistant" and isinstance(obj.get("message"), dict):
+                    msg = obj["message"]
+                    m = msg.get("model", "")
+                    if m:
+                        stats["model"] = m
+
+                    usage = msg.get("usage", {})
+                    if usage:
+                        stats["total_output_tokens"] += usage.get("output_tokens", 0)
+
+                    content = msg.get("content", [])
+                    if isinstance(content, list):
+                        stats["total_tool_calls"] += sum(
+                            1 for c in content
+                            if isinstance(c, dict) and c.get("type") == "tool_use"
+                        )
+    except (FileNotFoundError, OSError):
+        pass
+    return stats
+
+
+# ── Checkpoint (for turn-level stats) ────────────────────────────────
+
+CHECKPOINT_PATH = CONFIG_DIR / ".last_stats"
+
+
+def _load_checkpoint() -> dict:
+    try:
+        with open(CHECKPOINT_PATH, "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+def _save_checkpoint(stats: dict) -> None:
+    try:
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        checkpoint = {
+            "output_tokens": stats["total_output_tokens"],
+            "tool_calls": stats["total_tool_calls"],
+            "turns": stats["total_turns"],
+            "time": time.time(),
+        }
+        with open(CHECKPOINT_PATH, "w") as f:
+            json.dump(checkpoint, f)
+    except OSError:
+        pass
+
+
+def _calc_duration(start_ts: str | None) -> str:
+    """Calculate duration from an ISO timestamp to now."""
+    if not start_ts:
+        return ""
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%S"
+        t1 = datetime.strptime(start_ts[:19], fmt).replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        secs = int((now - t1).total_seconds())
+        if secs < 0:
+            secs = 0
+        if secs < 60:
+            return f"{secs}s"
+        if secs < 3600:
+            return f"{secs // 60}m {secs % 60}s"
+        return f"{secs // 3600}h {(secs % 3600) // 60}m"
+    except (ValueError, TypeError):
+        return ""
+
+
+# ── Git info ─────────────────────────────────────────────────────────
+
+
+def _get_git_info(cwd: str) -> dict:
+    """Get git info from the working directory."""
+    info = {"branch": "", "last_commit": "", "dirty": False}
+    if not cwd:
+        return info
+    try:
+        # Branch
+        r = subprocess.run(
+            ["git", "-C", cwd, "branch", "--show-current"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            info["branch"] = r.stdout.strip()
+
+        # Last commit (short)
+        r = subprocess.run(
+            ["git", "-C", cwd, "log", "--oneline", "-1", "--format=%h %s"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            info["last_commit"] = r.stdout.strip()[:60]
+
+        # Dirty?
+        r = subprocess.run(
+            ["git", "-C", cwd, "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if r.returncode == 0:
+            info["dirty"] = bool(r.stdout.strip())
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return info
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -138,91 +266,184 @@ def _hostname() -> str:
 def _truncate(text: str, max_len: int = 200) -> str:
     if not text:
         return ""
-    # Collapse to first meaningful chunk
     text = text.strip()
     return text[:max_len] + "..." if len(text) > max_len else text
+
+
+def _clean_markdown(text: str) -> str:
+    """Convert standard Markdown to Lark card compatible subset.
+
+    Lark card markdown only supports: **bold**, *italic*, ~~strike~~,
+    [link](url), `inline code`, and \\n line breaks.
+    Does NOT support: # headings, tables, code blocks, lists, blockquotes.
+    """
+    import re
+
+    lines = text.split("\n")
+    out: list[str] = []
+    in_code_block = False
+
+    for line in lines:
+        # Toggle code blocks (``` ... ```)
+        if line.strip().startswith("```"):
+            in_code_block = not in_code_block
+            continue  # skip the ``` delimiter lines
+
+        if in_code_block:
+            # Wrap code lines in inline code if short enough
+            stripped = line.rstrip()
+            if stripped:
+                out.append(f"`{stripped}`")
+            else:
+                out.append("")
+            continue
+
+        # Convert headings: ### Title → **Title**
+        heading_match = re.match(r'^(#{1,6})\s+(.+)$', line)
+        if heading_match:
+            out.append(f"**{heading_match.group(2).strip()}**")
+            continue
+
+        # Convert blockquotes: > text → text
+        if line.startswith("> "):
+            out.append(line[2:])
+            continue
+
+        # Convert list items: - item → • item
+        list_match = re.match(r'^(\s*)[-*]\s+(.+)$', line)
+        if list_match:
+            indent = "  " * (len(list_match.group(1)) // 2)
+            out.append(f"{indent}• {list_match.group(2)}")
+            continue
+
+        # Convert numbered lists: 1. item → 1. item (keep as-is, readable)
+        out.append(line)
+
+    return "\n".join(out)
+
+
+def _fmt_tokens(n: int) -> str:
+    """Format token count: 856, 12.5k, 1.2M."""
+    if n < 1_000:
+        return str(n)
+    if n < 1_000_000:
+        return f"{n / 1_000:.1f}k"
+    return f"{n / 1_000_000:.1f}M"
 
 
 # ── Card builders ────────────────────────────────────────────────────
 
 
-def _build_stop_card(event: dict) -> dict:
-    """Rich card for Stop events — task completion."""
+def _column(weight: int, content: str) -> dict:
+    """Helper to build a single column element."""
+    return {
+        "tag": "column",
+        "width": "weighted",
+        "weight": weight,
+        "vertical_align": "top",
+        "elements": [{"tag": "markdown", "content": content}],
+    }
+
+
+def _columns(cols: list[dict]) -> dict:
+    """Helper to build a column_set."""
+    return {
+        "tag": "column_set",
+        "flex_mode": "none",
+        "background_style": "default",
+        "columns": cols,
+    }
+
+
+def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
+    """Rich card for Stop events with full statistics."""
     cwd = event.get("cwd", "")
     project = _project_name(cwd)
-    session_id = event.get("session_id", "")
     last_msg = event.get("last_assistant_message", "")
     host = _hostname()
     now = _now_str()
 
-    # ── Elements ──
+    branch = git.get("branch") or stats.get("git_branch") or ""
+
+    # Calculate turn data via checkpoint diff
+    prev = _load_checkpoint()
+    total_tok = stats["total_output_tokens"]
+    total_tools = stats["total_tool_calls"]
+    turn_tok = total_tok - prev.get("output_tokens", 0)
+    turn_tools = total_tools - prev.get("tool_calls", 0)
+    if turn_tok < 0:
+        turn_tok = total_tok  # new session, no valid checkpoint
+    if turn_tools < 0:
+        turn_tools = total_tools
+
+    # Duration: time since last checkpoint (= time user was waiting)
+    prev_time = prev.get("time", 0)
+    if prev_time > 0:
+        elapsed = int(time.time() - prev_time)
+        if elapsed < 60:
+            duration = f"{elapsed}s"
+        elif elapsed < 3600:
+            duration = f"{elapsed // 60}m {elapsed % 60}s"
+        else:
+            duration = f"{elapsed // 3600}h {(elapsed % 3600) // 60}m"
+    else:
+        duration = _calc_duration(stats["last_user_ts"])
+
     elements: list[dict] = []
 
-    # Row 1: project + host (two columns)
-    elements.append(
-        {
-            "tag": "column_set",
-            "flex_mode": "none",
-            "background_style": "default",
-            "columns": [
-                {
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 1,
-                    "vertical_align": "top",
-                    "elements": [
-                        {
-                            "tag": "markdown",
-                            "content": f"📁 **项目**\n{project}",
-                        }
-                    ],
-                },
-                {
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 1,
-                    "vertical_align": "top",
-                    "elements": [
-                        {
-                            "tag": "markdown",
-                            "content": f"💻 **设备**\n{host}",
-                        }
-                    ],
-                },
-            ],
-        }
-    )
+    # ── Row 1: Project + Device ──
+    elements.append(_columns([
+        _column(1, f"📁 **项目**\n{project}"),
+        _column(1, f"💻 **设备**\n{host}"),
+    ]))
 
-    # Divider
     elements.append({"tag": "hr"})
 
-    # Last message
+    # ── Stats row: 5 columns ──
+    stats_cols = []
+    if duration:
+        stats_cols.append(_column(1, f"⏱ **耗时**\n{duration}"))
+    if total_tok > 0:
+        stats_cols.append(_column(1, f"📊 **Tokens**\n{_fmt_tokens(turn_tok)} / {_fmt_tokens(total_tok)}"))
+    if total_tools > 0:
+        stats_cols.append(_column(1, f"🔧 **工具**\n{turn_tools} / {total_tools}"))
+    if stats["total_turns"] > 0:
+        stats_cols.append(_column(1, f"💬 **对话**\n{stats['total_turns']} 轮"))
+    if branch:
+        dirty_mark = " ●" if git.get("dirty") else ""
+        stats_cols.append(_column(1, f"🌿 **分支**\n`{branch}`{dirty_mark}"))
+
+    if stats_cols:
+        elements.append(_columns(stats_cols))
+
+    # ── Git last commit ──
+    last_commit = git.get("last_commit", "")
+    if last_commit:
+        elements.append({"tag": "markdown", "content": f"📝 **最近提交**  `{last_commit}`"})
+
+    elements.append({"tag": "hr"})
+
+    # ── Claude's last message ──
     if last_msg:
-        snippet = _truncate(last_msg, 500)
-        elements.append(
-            {
-                "tag": "markdown",
-                "content": f"💬 **Claude 的回复**\n{snippet}",
-            }
-        )
+        cleaned = _clean_markdown(last_msg)
+        # Lark card payload limit ~28KB; leave room for other fields
+        snippet = _truncate(cleaned, 4000)
+        elements.append({"tag": "markdown", "content": f"💬 **Claude 的回复**\n{snippet}"})
         elements.append({"tag": "hr"})
 
-    # Footer: directory + session + time
+    # ── Footer ──
     footer_parts = []
     if cwd:
         footer_parts.append(f"📂 {cwd}")
+    session_id = event.get("session_id", "")
     if session_id:
         footer_parts.append(f"🔑 {session_id[:12]}")
     footer_parts.append(f"🕐 {now}")
 
-    elements.append(
-        {
-            "tag": "note",
-            "elements": [
-                {"tag": "plain_text", "content": "  |  ".join(footer_parts)}
-            ],
-        }
-    )
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text", "content": "  |  ".join(footer_parts)}],
+    })
 
     return {
         "config": {"wide_screen_mode": True},
@@ -234,8 +455,8 @@ def _build_stop_card(event: dict) -> dict:
     }
 
 
-def _build_notification_card(event: dict) -> dict:
-    """Rich card for Notification events — needs attention."""
+def _build_notification_card(event: dict, stats: dict, git: dict) -> dict:
+    """Rich card for Notification events."""
     cwd = event.get("cwd", "")
     project = _project_name(cwd)
     message = event.get("message", "")
@@ -243,12 +464,12 @@ def _build_notification_card(event: dict) -> dict:
     notif_type = event.get("notification_type", "")
     host = _hostname()
     now = _now_str()
+    branch = git.get("branch") or stats.get("git_branch") or ""
 
-    # Header style by notification type
     header_map = {
         "permission_prompt": ("⚠️ Claude Code 需要你的确认", "orange"),
-        "idle_prompt": ("⏳ Claude Code 等待输入", "yellow"),
-        "auth_success": ("✅ Claude Code 认证成功", "green"),
+        "idle_prompt":       ("⏳ Claude Code 等待输入", "yellow"),
+        "auth_success":      ("✅ Claude Code 认证成功", "green"),
         "elicitation_dialog": ("📝 Claude Code 需要信息", "blue"),
     }
     header_title, header_color = header_map.get(
@@ -257,63 +478,35 @@ def _build_notification_card(event: dict) -> dict:
 
     elements: list[dict] = []
 
-    # Row 1: project + host
-    elements.append(
-        {
-            "tag": "column_set",
-            "flex_mode": "none",
-            "background_style": "default",
-            "columns": [
-                {
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 1,
-                    "vertical_align": "top",
-                    "elements": [
-                        {"tag": "markdown", "content": f"📁 **项目**\n{project}"}
-                    ],
-                },
-                {
-                    "tag": "column",
-                    "width": "weighted",
-                    "weight": 1,
-                    "vertical_align": "top",
-                    "elements": [
-                        {"tag": "markdown", "content": f"💻 **设备**\n{host}"}
-                    ],
-                },
-            ],
-        }
-    )
+    # ── Row 1: Project + Device ──
+    col1 = [_column(1, f"📁 **项目**\n{project}")]
+    col1.append(_column(1, f"💻 **设备**\n{host}"))
+    elements.append(_columns(col1))
 
     elements.append({"tag": "hr"})
 
-    # Title (if present)
+    # ── Title + Message ──
     if title_text:
         elements.append({"tag": "markdown", "content": f"**{title_text}**"})
-
-    # Message content
     if message:
-        elements.append(
-            {"tag": "markdown", "content": f"💬 {_truncate(message, 500)}"}
-        )
+        elements.append({"tag": "markdown", "content": f"💬 {_truncate(_clean_markdown(message), 4000)}"})
+
+    # ── Branch info ──
+    if branch:
+        elements.append({"tag": "markdown", "content": f"🌿 **分支**  `{branch}`"})
 
     elements.append({"tag": "hr"})
 
-    # Footer
+    # ── Footer ──
     footer_parts = []
     if cwd:
         footer_parts.append(f"📂 {cwd}")
     footer_parts.append(f"🕐 {now}")
 
-    elements.append(
-        {
-            "tag": "note",
-            "elements": [
-                {"tag": "plain_text", "content": "  |  ".join(footer_parts)}
-            ],
-        }
-    )
+    elements.append({
+        "tag": "note",
+        "elements": [{"tag": "plain_text", "content": "  |  ".join(footer_parts)}],
+    })
 
     return {
         "config": {"wide_screen_mode": True},
@@ -372,18 +565,25 @@ def main() -> None:
     if event_name and event_name not in allowed:
         return
 
+    # Parse transcript for rich stats
+    transcript_path = event.get("transcript_path", "")
+    stats = _parse_transcript(transcript_path)
+
+    # Get git info
+    cwd = event.get("cwd", "")
+    git = _get_git_info(cwd)
+
     # Build card
     if event_name == "Stop":
-        card = _build_stop_card(event)
-    elif event_name == "Notification":
-        card = _build_notification_card(event)
+        card = _build_stop_card(event, stats, git)
     else:
-        card = _build_notification_card(event)
+        card = _build_notification_card(event, stats, git)
 
-    # Send
+    # Send + save checkpoint
     token = get_token(config["app_id"], config["app_secret"])
     if token:
         send_card(token, config["open_id"], card)
+        _save_checkpoint(stats)
 
 
 if __name__ == "__main__":
