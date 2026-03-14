@@ -198,6 +198,7 @@ def _save_checkpoint(stats: dict) -> None:
             "output_tokens": stats["total_output_tokens"],
             "tool_calls": stats["total_tool_calls"],
             "turns": stats["total_turns"],
+            "agents": stats["total_agents"],
             "time": time.time(),
         }
         with open(CHECKPOINT_PATH, "w") as f:
@@ -389,6 +390,15 @@ def _columns(cols: list[dict]) -> dict:
     }
 
 
+def _is_subagent(event: dict) -> bool:
+    """Detect if this hook was triggered by a sub-agent (worktree/swarm)."""
+    cwd = event.get("cwd", "")
+    # Swarm/worktree agents run in worktree directories
+    if "/worktrees/" in cwd or "/.worktree" in cwd:
+        return True
+    return False
+
+
 def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
     """Rich card for Stop events with full statistics."""
     cwd = event.get("cwd", "")
@@ -396,6 +406,7 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
     last_msg = event.get("last_assistant_message", "")
     host = _hostname()
     now = _now_str()
+    is_sub = _is_subagent(event)
 
     branch = git.get("branch") or stats.get("git_branch") or ""
 
@@ -450,25 +461,31 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
     if stats_cols:
         elements.append(_columns(stats_cols))
 
-    # ── Sub-agents ──
-    turn_agents = stats.get("turn_agents", [])
+    # ── Sub-agents (only show new ones since last checkpoint) ──
+    all_agents = stats.get("agents", [])
     total_agents = stats.get("total_agents", 0)
-    if turn_agents:
+    prev_agent_count = prev.get("agents", 0)
+    new_agent_count = total_agents - prev_agent_count
+    if new_agent_count < 0:
+        new_agent_count = total_agents
+        prev_agent_count = 0
+
+    if new_agent_count > 0:
+        # Show only the newly spawned agents (tail of the list)
+        new_agents = all_agents[-new_agent_count:] if all_agents else []
         agent_lines = []
-        for a in turn_agents:
+        for a in new_agents:
             label = a.get("name") or a.get("type") or "agent"
             desc = a.get("desc", "")
             if desc:
                 agent_lines.append(f"• **{label}**  {desc}")
             else:
                 agent_lines.append(f"• **{label}**")
-        header = f"🤖 **子 Agent** ({len(turn_agents)}"
-        if total_agents > len(turn_agents):
+        header = f"🤖 **子 Agent** ({new_agent_count} 个"
+        if prev_agent_count > 0:
             header += f" / 本会话共 {total_agents}"
         header += ")"
         elements.append({"tag": "markdown", "content": header + "\n" + "\n".join(agent_lines)})
-    elif total_agents > 0:
-        elements.append({"tag": "markdown", "content": f"🤖 **子 Agent**  本会话共 {total_agents} 个"})
 
     # ── Git last commit ──
     last_commit = git.get("last_commit", "")
@@ -499,11 +516,19 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
         "elements": [{"tag": "plain_text", "content": "  |  ".join(footer_parts)}],
     })
 
+    # Header: differentiate main vs sub-agent
+    if is_sub:
+        header_title = f"🔧 子 Agent 完成 — {project}"
+        header_color = "blue"
+    else:
+        header_title = "✅ Claude Code 任务完成"
+        header_color = "turquoise"
+
     return {
         "config": {"wide_screen_mode": True},
         "header": {
-            "title": {"tag": "plain_text", "content": "✅ Claude Code 任务完成"},
-            "template": "turquoise",
+            "title": {"tag": "plain_text", "content": header_title},
+            "template": header_color,
         },
         "elements": elements,
     }
