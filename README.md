@@ -4,11 +4,6 @@
 
 Claude Code 完成任务或需要你确认时，自动发送飞书消息提醒——让你可以放心离开终端，回来时不会错过任何事。
 
-<p align="center">
-  <img src="docs/screenshot-stop.png" width="400" alt="Stop notification card" />
-  <img src="docs/screenshot-notification.png" width="400" alt="Notification card" />
-</p>
-
 ---
 
 ## 特性

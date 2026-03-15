@@ -96,18 +96,18 @@ fi
 
 # Verify credentials
 step "Step 2/4  验证 API 连接"
-TOKEN=$(python3 -c "
-import json, urllib.request, sys
+TOKEN=$(LARK_APP_ID="$APP_ID" LARK_APP_SECRET="$APP_SECRET" python3 -c "
+import json, urllib.request, sys, os
 req = urllib.request.Request(
     'https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal/',
-    data=json.dumps({'app_id': '$APP_ID', 'app_secret': '$APP_SECRET'}).encode(),
+    data=json.dumps({'app_id': os.environ['LARK_APP_ID'], 'app_secret': os.environ['LARK_APP_SECRET']}).encode(),
     headers={'Content-Type': 'application/json'}, method='POST')
 try:
     data = json.loads(urllib.request.urlopen(req, timeout=10).read())
     if data.get('code') == 0: print(data['tenant_access_token'])
     else: print('FAIL:' + data.get('msg',''), file=sys.stderr); sys.exit(1)
 except Exception as e: print('FAIL:' + str(e), file=sys.stderr); sys.exit(1)
-" 2>&1) || error "API 连接失败: $TOKEN"
+" 2>&1) || error "API 连接失败，请检查 App ID 和 App Secret"
 ok "飞书 API 连接成功"
 
 # ══════════════════════════════════════════════════════════════════════
@@ -143,12 +143,14 @@ fi
 if [[ -n "$PHONE" || -n "$EMAIL" ]]; then
     info "通过 ${PHONE:+手机号}${EMAIL:+邮箱} 查询 Open ID..."
 
-    OPEN_ID=$(python3 -c "
-import json, urllib.request, sys
-token = '$TOKEN'
+    OPEN_ID=$(LARK_TOKEN="$TOKEN" LARK_PHONE="$PHONE" LARK_EMAIL="$EMAIL" python3 -c "
+import json, urllib.request, sys, os
+token = os.environ['LARK_TOKEN']
+phone = os.environ.get('LARK_PHONE', '')
+email = os.environ.get('LARK_EMAIL', '')
 payload = {}
-if '$PHONE': payload['mobiles'] = ['$PHONE']
-if '$EMAIL': payload['emails'] = ['$EMAIL']
+if phone: payload['mobiles'] = [phone]
+if email: payload['emails'] = [email]
 req = urllib.request.Request(
     'https://open.feishu.cn/open-apis/contact/v3/users/batch_get_id?user_id_type=open_id',
     data=json.dumps(payload).encode(),

@@ -268,8 +268,11 @@ def _get_git_info(cwd: str) -> dict:
 
 
 def _now_str() -> str:
-    cn = datetime.now(timezone.utc) + timedelta(hours=8)
-    return cn.strftime("%Y-%m-%d %H:%M:%S")
+    # Use TZ env or default to Asia/Shanghai (UTC+8)
+    import os
+    offset_hours = int(os.environ.get("CLAUDE_LARK_TZ_OFFSET", "8"))
+    local = datetime.now(timezone.utc) + timedelta(hours=offset_hours)
+    return local.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _project_name(cwd: str) -> str:

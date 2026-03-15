@@ -530,6 +530,58 @@ class TestBuildNotificationCard:
 # ── Main flow ────────────────────────────────────────────────────────
 
 
+class TestSendCard:
+    def test_success(self):
+        resp_body = json.dumps({"code": 0}).encode()
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = resp_body
+        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = mock.MagicMock(return_value=False)
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            result = notify.send_card("t-abc", "ou_x", {"header": {}, "elements": []})
+        assert result is True
+
+    def test_api_error(self):
+        resp_body = json.dumps({"code": 99999, "msg": "fail"}).encode()
+        mock_resp = mock.MagicMock()
+        mock_resp.read.return_value = resp_body
+        mock_resp.__enter__ = mock.MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = mock.MagicMock(return_value=False)
+        with mock.patch("urllib.request.urlopen", return_value=mock_resp):
+            result = notify.send_card("t-abc", "ou_x", {"header": {}, "elements": []})
+        assert result is False
+
+    def test_network_error(self):
+        with mock.patch("urllib.request.urlopen", side_effect=notify.urllib.error.URLError("timeout")):
+            result = notify.send_card("t-abc", "ou_x", {"header": {}, "elements": []})
+        assert result is False
+
+
+class TestTruncateLargeMessage:
+    def test_oversized_message_truncated(self, tmp_path):
+        """Messages > 4000 chars should be truncated in the card."""
+        huge_msg = "x" * 5000
+        event = {
+            "hook_event_name": "Stop",
+            "cwd": "/tmp/proj",
+            "session_id": "s1",
+            "last_assistant_message": huge_msg,
+        }
+        stats = {
+            "total_output_tokens": 100, "total_tool_calls": 1,
+            "total_turns": 1, "total_agents": 0, "agents": [],
+            "turn_agents": [], "last_user_ts": None, "model": "", "git_branch": "",
+        }
+        git = {"branch": "", "last_commit": "", "dirty": False}
+        cp = tmp_path / ".last_stats"
+        with mock.patch.object(notify, "CHECKPOINT_PATH", cp), \
+             mock.patch.object(notify, "CONFIG_DIR", tmp_path):
+            card = notify._build_stop_card(event, stats, git)
+        card_str = json.dumps(card)
+        # The 5000-char message should be truncated to ~4000 + "..."
+        assert len(card_str) < 10000
+
+
 class TestMain:
     def test_no_config_exits_silently(self, tmp_path):
         with mock.patch.object(notify, "CONFIG_PATH", tmp_path / "nope.json"):
