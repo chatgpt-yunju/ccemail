@@ -43,23 +43,22 @@ Just 2 HTTP requests, all local. No intermediate server.
 
 ## Quick Start
 
-### 1. Clone
+### One-Line Install (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ysyecust/claude-lark/main/scripts/install-remote.sh | bash
+```
+
+### Or Clone & Install
 
 ```bash
 git clone https://github.com/ysyecust/claude-lark.git
 cd claude-lark
-```
 
-### 2. Install
+# macOS / Linux
+chmod +x scripts/install.sh && ./scripts/install.sh
 
-**macOS / Linux:**
-```bash
-chmod +x scripts/install.sh
-./scripts/install.sh
-```
-
-**Windows (PowerShell):**
-```powershell
+# Windows (PowerShell)
 .\scripts\install.ps1
 ```
 
@@ -86,16 +85,20 @@ Config file: `~/.config/claude-lark/config.json` (permissions 600 on macOS/Linux
     "app_id": "cli_xxx",
     "app_secret": "xxx",
     "open_id": "ou_xxx",
-    "events": ["Stop", "Notification"]
+    "events": ["Stop", "Notification"],
+    "min_duration": 0,
+    "quiet_hours": null
 }
 ```
 
-| Field | Description | Source |
-|-------|-------------|--------|
-| `app_id` | Lark Bot App ID | Team admin |
-| `app_secret` | Lark Bot App Secret | Team admin |
-| `open_id` | Your Lark Open ID | Auto-detected by installer |
-| `events` | Which events to notify (optional) | Default: `["Stop", "Notification"]` |
+| Field | Description | Default |
+|-------|-------------|---------|
+| `app_id` | Lark Bot App ID | — |
+| `app_secret` | Lark Bot App Secret | — |
+| `open_id` | Your Lark Open ID | — |
+| `events` | Which events to notify | `["Stop", "Notification"]` |
+| `min_duration` | Skip if Claude responded in < N seconds | `0` (disabled) |
+| `quiet_hours` | No notifications during `[start, end)` hours | `null` (disabled) |
 
 ### Event Filtering
 
@@ -330,7 +333,10 @@ No. The hook timeout is 30s, but actual execution is ~100ms. Any errors exit sil
 
 **Q: Too many notifications?**
 
-Set `"events": ["Notification"]` in config to only get notified when Claude needs your input, not on every response.
+Several options:
+- `"events": ["Notification"]` — only notify when Claude needs your input
+- `"min_duration": 30` — skip notifications if Claude responded in under 30 seconds
+- `"quiet_hours": [23, 8]` — no notifications between 23:00 and 08:00
 
 **Q: Multiple machines?**
 

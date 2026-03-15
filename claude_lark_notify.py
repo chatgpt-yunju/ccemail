@@ -703,9 +703,37 @@ def main() -> None:
         _debug_log(f"Event '{event_name}' not in allowed list {allowed}, skipping")
         return
 
+    # Quiet hours filter (e.g. "quiet_hours": [23, 8] = 23:00–08:00 no notify)
+    quiet = config.get("quiet_hours")
+    if quiet and len(quiet) == 2 and event_name == "Stop":
+        import os as _os
+        offset = int(_os.environ.get("CLAUDE_LARK_TZ_OFFSET", "8"))
+        local_hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
+        start, end = quiet
+        if start > end:  # overnight range e.g. [23, 8]
+            is_quiet = local_hour >= start or local_hour < end
+        else:  # daytime range e.g. [12, 14]
+            is_quiet = start <= local_hour < end
+        if is_quiet:
+            _debug_log(f"Quiet hours ({start}-{end}), local hour={local_hour}, skipping")
+            return
+
     # Parse transcript for rich stats
     transcript_path = event.get("transcript_path", "")
     stats = _parse_transcript(transcript_path)
+
+    # Min duration filter (skip quick responses, e.g. "min_duration": 30)
+    min_dur = config.get("min_duration", 0)
+    if min_dur > 0 and event_name == "Stop" and stats.get("last_user_ts"):
+        try:
+            fmt = "%Y-%m-%dT%H:%M:%S"
+            t1 = datetime.strptime(stats["last_user_ts"][:19], fmt).replace(tzinfo=timezone.utc)
+            elapsed = (datetime.now(timezone.utc) - t1).total_seconds()
+            if elapsed < min_dur:
+                _debug_log(f"Duration {elapsed:.0f}s < min_duration {min_dur}s, skipping")
+                return
+        except (ValueError, TypeError):
+            pass
 
     # Get git info
     cwd = event.get("cwd", "")

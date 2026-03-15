@@ -43,22 +43,22 @@ Claude Code 事件 (Stop / Notification)
 
 ## 快速开始
 
-### 1. 克隆仓库
+### 一键安装 (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ysyecust/claude-lark/main/scripts/install-remote.sh | bash
+```
+
+### 或手动克隆安装
 
 ```bash
 git clone https://github.com/ysyecust/claude-lark.git
 cd claude-lark
-```
 
-### 2. 运行安装器
+# macOS / Linux
+chmod +x scripts/install.sh && ./scripts/install.sh
 
-**macOS / Linux:**
-```bash
-chmod +x scripts/install.sh
-./scripts/install.sh
-```
-
-**Windows (PowerShell):**
+# Windows (PowerShell)
 ```powershell
 .\scripts\install.ps1
 ```
@@ -329,7 +329,10 @@ claude-lark/
 
 **Q: 通知太频繁怎么办？**
 
-在配置中设置 `"events": ["Notification"]`，只在需要确认时通知，不在每次回复完成时通知。
+多种方式组合使用：
+- `"events": ["Notification"]` — 只在需要确认时通知
+- `"min_duration": 30` — Claude 响应不到 30 秒则不通知
+- `"quiet_hours": [23, 8]` — 23:00 到 08:00 之间不打扰
 
 **Q: 多台电脑怎么办？**
 

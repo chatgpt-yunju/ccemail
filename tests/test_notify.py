@@ -590,6 +590,115 @@ class TestTruncateLargeMessage:
         assert len(card_str) < 10000
 
 
+class TestFiltering:
+    def test_min_duration_skips_quick(self, tmp_path):
+        """Stop events shorter than min_duration should be skipped."""
+        cfg_path = tmp_path / "config.json"
+        _write_json(cfg_path, {
+            "app_id": "cli_x", "app_secret": "s", "open_id": "ou_x",
+            "min_duration": 60,  # require at least 60s
+        })
+        # Simulate a user message from 5 seconds ago
+        from datetime import datetime, timezone
+        recent_ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        transcript = tmp_path / "transcript.jsonl"
+        with open(transcript, "w") as f:
+            f.write(json.dumps({"type": "user", "userType": "external", "timestamp": recent_ts}) + "\n")
+
+        event = {
+            "hook_event_name": "Stop", "cwd": "/tmp",
+            "session_id": "s1", "transcript_path": str(transcript),
+        }
+        with mock.patch.object(notify, "CONFIG_PATH", cfg_path), \
+             mock.patch.object(notify, "CHECKPOINT_DIR", tmp_path / "cp"), \
+             mock.patch.object(notify, "CONFIG_DIR", tmp_path), \
+             mock.patch("sys.stdin") as m, \
+             mock.patch.object(notify, "get_token", return_value="t") as gt, \
+             mock.patch.object(notify, "send_card") as send, \
+             mock.patch.object(notify, "_get_git_info", return_value={"branch": "", "last_commit": "", "dirty": False}):
+            m.isatty.return_value = False
+            m.read.return_value = json.dumps(event)
+            notify.main()
+        send.assert_not_called()
+
+    def test_min_duration_allows_long(self, tmp_path):
+        """Stop events longer than min_duration should be sent."""
+        cfg_path = tmp_path / "config.json"
+        _write_json(cfg_path, {
+            "app_id": "cli_x", "app_secret": "s", "open_id": "ou_x",
+            "min_duration": 5,
+        })
+        from datetime import datetime, timezone, timedelta
+        old_ts = (datetime.now(timezone.utc) - timedelta(seconds=120)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        transcript = tmp_path / "transcript.jsonl"
+        with open(transcript, "w") as f:
+            f.write(json.dumps({"type": "user", "userType": "external", "timestamp": old_ts}) + "\n")
+
+        event = {
+            "hook_event_name": "Stop", "cwd": "/tmp",
+            "session_id": "s1", "transcript_path": str(transcript),
+        }
+        with mock.patch.object(notify, "CONFIG_PATH", cfg_path), \
+             mock.patch.object(notify, "CHECKPOINT_DIR", tmp_path / "cp"), \
+             mock.patch.object(notify, "CONFIG_DIR", tmp_path), \
+             mock.patch("sys.stdin") as m, \
+             mock.patch.object(notify, "get_token", return_value="t") as gt, \
+             mock.patch.object(notify, "send_card", return_value=True) as send, \
+             mock.patch.object(notify, "_get_git_info", return_value={"branch": "", "last_commit": "", "dirty": False}):
+            m.isatty.return_value = False
+            m.read.return_value = json.dumps(event)
+            notify.main()
+        send.assert_called_once()
+
+    def test_quiet_hours_blocks(self, tmp_path):
+        """During quiet hours, Stop events should be skipped."""
+        from datetime import datetime, timezone, timedelta
+        # Get current local hour and set quiet_hours to include it
+        offset = 8
+        local_hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
+        quiet_start = local_hour
+        quiet_end = (local_hour + 2) % 24
+
+        cfg_path = tmp_path / "config.json"
+        _write_json(cfg_path, {
+            "app_id": "cli_x", "app_secret": "s", "open_id": "ou_x",
+            "quiet_hours": [quiet_start, quiet_end],
+        })
+        with mock.patch.object(notify, "CONFIG_PATH", cfg_path), \
+             mock.patch("sys.stdin") as m, \
+             mock.patch.object(notify, "send_card") as send:
+            m.isatty.return_value = False
+            m.read.return_value = json.dumps({"hook_event_name": "Stop", "cwd": "/tmp"})
+            notify.main()
+        send.assert_not_called()
+
+    def test_quiet_hours_allows_notification_events(self, tmp_path):
+        """Notification events should bypass quiet hours (they're urgent)."""
+        from datetime import datetime, timezone, timedelta
+        offset = 8
+        local_hour = (datetime.now(timezone.utc) + timedelta(hours=offset)).hour
+
+        cfg_path = tmp_path / "config.json"
+        _write_json(cfg_path, {
+            "app_id": "cli_x", "app_secret": "s", "open_id": "ou_x",
+            "quiet_hours": [local_hour, (local_hour + 2) % 24],
+        })
+        with mock.patch.object(notify, "CONFIG_PATH", cfg_path), \
+             mock.patch.object(notify, "CHECKPOINT_DIR", tmp_path / "cp"), \
+             mock.patch.object(notify, "CONFIG_DIR", tmp_path), \
+             mock.patch("sys.stdin") as m, \
+             mock.patch.object(notify, "get_token", return_value="t"), \
+             mock.patch.object(notify, "send_card", return_value=True) as send, \
+             mock.patch.object(notify, "_get_git_info", return_value={"branch": "", "last_commit": "", "dirty": False}):
+            m.isatty.return_value = False
+            m.read.return_value = json.dumps({
+                "hook_event_name": "Notification", "cwd": "/tmp",
+                "notification_type": "permission_prompt", "message": "need permission",
+            })
+            notify.main()
+        send.assert_called_once()
+
+
 class TestMain:
     def test_no_config_exits_silently(self, tmp_path):
         with mock.patch.object(notify, "CONFIG_PATH", tmp_path / "nope.json"):
