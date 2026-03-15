@@ -330,7 +330,23 @@ def _now_str() -> str:
 
 
 def _project_name(cwd: str) -> str:
-    return Path(cwd).name if cwd else "unknown"
+    """Extract project name. For worktrees, resolve to the original repo name."""
+    if not cwd:
+        return "unknown"
+    # Try to get the original repo path via git (handles worktrees)
+    try:
+        r = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, timeout=3,
+        )
+        if r.returncode == 0:
+            # Returns e.g. "/Users/me/Code/SEIR/.git" → "SEIR"
+            git_dir = r.stdout.strip().rstrip("/")
+            if git_dir.endswith("/.git"):
+                return Path(git_dir).parent.name
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        pass
+    return Path(cwd).name
 
 
 def _hostname() -> str:
@@ -565,7 +581,11 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
 
     # Header: differentiate main vs sub-agent
     if is_sub:
-        header_title = f"🔧 子 Agent 完成 — {project}"
+        worktree_name = Path(cwd).name if cwd else ""
+        if worktree_name and worktree_name != project:
+            header_title = f"🔧 子 Agent 完成 — {project}/{worktree_name}"
+        else:
+            header_title = f"🔧 子 Agent 完成 — {project}"
         header_color = "blue"
     else:
         header_title = "✅ Claude Code 任务完成"

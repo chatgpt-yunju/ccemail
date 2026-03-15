@@ -463,10 +463,14 @@ class TestBuildStopCard:
         event = self._base_event()
         event["cwd"] = "/tmp/project/worktrees/agent-1"
         cp_dir = tmp_path / "checkpoints"
-        with mock.patch.object(notify, "CHECKPOINT_DIR", cp_dir):
+        with mock.patch.object(notify, "CHECKPOINT_DIR", cp_dir), \
+             mock.patch.object(notify, "_project_name", return_value="SEIR"):
             card = notify._build_stop_card(event, self._base_stats(), self._base_git())
         assert card["header"]["template"] == "blue"
         assert "子 Agent" in card["header"]["title"]["content"]
+        # Should show both original project and worktree name
+        assert "SEIR" in card["header"]["title"]["content"]
+        assert "agent-1" in card["header"]["title"]["content"]
 
     def test_card_with_agents(self, tmp_path):
         stats = self._base_stats()
