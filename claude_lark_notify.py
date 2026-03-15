@@ -424,18 +424,8 @@ def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:
     if turn_tools < 0:
         turn_tools = total_tools
 
-    # Duration: time since last checkpoint (= time user was waiting)
-    prev_time = prev.get("time", 0)
-    if prev_time > 0:
-        elapsed = int(time.time() - prev_time)
-        if elapsed < 60:
-            duration = f"{elapsed}s"
-        elif elapsed < 3600:
-            duration = f"{elapsed // 60}m {elapsed % 60}s"
-        else:
-            duration = f"{elapsed // 3600}h {(elapsed % 3600) // 60}m"
-    else:
-        duration = _calc_duration(stats["last_user_ts"])
+    # Duration: time from user's last message to now (actual Claude processing time)
+    duration = _calc_duration(stats["last_user_ts"])
 
     elements: list[dict] = []
 
