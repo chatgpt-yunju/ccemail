@@ -1,5 +1,9 @@
 # claude-lark
 
+[![CI](https://github.com/ysyecust/claude-lark/actions/workflows/ci.yml/badge.svg)](https://github.com/ysyecust/claude-lark/actions/workflows/ci.yml)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 **Claude Code → Lark (Feishu) Notifications**
 
 [中文文档](README_zh.md)
