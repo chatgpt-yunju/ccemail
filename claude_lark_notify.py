@@ -302,7 +302,7 @@ def _now_str() -> str:
 
 
 def _project_name(cwd: str) -> str:
-    return cwd.rsplit("/", 1)[-1] if cwd else "unknown"
+    return Path(cwd).name if cwd else "unknown"
 
 
 def _hostname() -> str:
@@ -422,10 +422,9 @@ def _columns(cols: list[dict]) -> dict:
 def _is_subagent(event: dict) -> bool:
     """Detect if this hook was triggered by a sub-agent (worktree/swarm)."""
     cwd = event.get("cwd", "")
-    # Swarm/worktree agents run in worktree directories
-    if "/worktrees/" in cwd or "/.worktree" in cwd:
-        return True
-    return False
+    # Normalize to forward slashes for cross-platform matching
+    normalized = cwd.replace("\\", "/")
+    return "/worktrees/" in normalized or "/.worktree" in normalized
 
 
 def _build_stop_card(event: dict, stats: dict, git: dict) -> dict:

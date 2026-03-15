@@ -48,9 +48,15 @@ cd claude-lark
 
 ### 2. 运行安装器
 
+**macOS / Linux:**
 ```bash
 chmod +x install.sh
 ./install.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\install.ps1
 ```
 
 安装器会引导你完成：
@@ -244,8 +250,14 @@ echo '{"hook_event_name":"Stop","cwd":"/tmp/test","session_id":"test","last_assi
 
 ## 卸载
 
+**macOS / Linux:**
 ```bash
 ./uninstall.sh
+```
+
+**Windows:**
+```powershell
+.\uninstall.ps1
 ```
 
 自动移除 Claude Code hooks，可选删除配置文件。
@@ -269,9 +281,10 @@ claude-lark/
 
 ## 系统要求
 
-- Python 3.8+（macOS / Linux 自带）
+- Python 3.8+（macOS / Linux 自带；Windows 需 [安装](https://www.python.org/downloads/)）
 - [Claude Code](https://claude.ai/claude-code) CLI
 - 飞书自建应用（需 `im:message:send_as_bot` 权限）
+- **Windows**: PowerShell 5.1+（系统自带）
 
 ## FAQ
 

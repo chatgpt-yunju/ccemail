@@ -48,9 +48,15 @@ cd claude-lark
 
 ### 2. Install
 
+**macOS / Linux:**
 ```bash
 chmod +x install.sh
 ./install.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\install.ps1
 ```
 
 The installer will:
@@ -232,8 +238,14 @@ echo '{"hook_event_name":"Stop","cwd":"/tmp/test","session_id":"test","last_assi
 
 ## Uninstall
 
+**macOS / Linux:**
 ```bash
 ./uninstall.sh
+```
+
+**Windows:**
+```powershell
+.\uninstall.ps1
 ```
 
 Removes Claude Code hooks and optionally deletes config files.
@@ -245,10 +257,12 @@ Removes Claude Code hooks and optionally deletes config files.
 ```
 claude-lark/
 ├── claude_lark_notify.py   # Hook script (single file, stdlib only)
-├── install.sh              # Interactive installer
-├── uninstall.sh            # Uninstaller
+├── install.sh              # Installer (macOS/Linux)
+├── install.ps1             # Installer (Windows)
+├── uninstall.sh            # Uninstaller (macOS/Linux)
+├── uninstall.ps1           # Uninstaller (Windows)
 ├── config.example.json     # Example configuration
-├── tests/                  # Test suite (57 tests)
+├── tests/                  # Test suite (58 tests)
 ├── CONTRIBUTING.md         # Contribution guidelines
 ├── CHANGELOG.md            # Version history
 ├── LICENSE                 # MIT
@@ -257,9 +271,10 @@ claude-lark/
 
 ## Requirements
 
-- Python 3.8+ (pre-installed on macOS / Linux)
+- Python 3.8+ (pre-installed on macOS / Linux; [download](https://www.python.org/downloads/) for Windows)
 - [Claude Code](https://claude.ai/claude-code) CLI
 - Lark Custom App with `im:message:send_as_bot` permission
+- **Windows**: PowerShell 5.1+ (built-in)
 
 ## FAQ
 
