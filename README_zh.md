@@ -10,6 +10,10 @@
 
 Claude Code 完成任务或需要你确认时，自动发送飞书消息提醒——让你可以放心离开终端，回来时不会错过任何事。
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="架构和卡片预览" width="700" />
+</p>
+
 ---
 
 ## 特性

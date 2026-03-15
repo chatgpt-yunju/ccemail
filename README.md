@@ -10,6 +10,10 @@
 
 Get instant Lark messages when Claude Code finishes a task or needs your attention — step away from the terminal without missing anything.
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="Architecture and card preview" width="700" />
+</p>
+
 ---
 
 ## Features

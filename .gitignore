@@ -2,6 +2,7 @@
 config.json
 .token_cache
 .last_stats
+checkpoints/
 
 # Python
 __pycache__/

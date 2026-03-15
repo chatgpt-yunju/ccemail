@@ -182,11 +182,12 @@ step "Step 4/4  安装"
 
 # Write config
 mkdir -p "$CONFIG_DIR"
-python3 -c "
-import json
-cfg = {'app_id': '$APP_ID', 'app_secret': '$APP_SECRET', 'open_id': '$OPEN_ID',
-       'events': ['Stop', 'Notification']}
-with open('$CONFIG_FILE', 'w') as f: json.dump(cfg, f, indent=4)
+LARK_APP_ID="$APP_ID" LARK_APP_SECRET="$APP_SECRET" LARK_OPEN_ID="$OPEN_ID" \
+LARK_CONFIG_FILE="$CONFIG_FILE" python3 -c "
+import json, os
+cfg = {'app_id': os.environ['LARK_APP_ID'], 'app_secret': os.environ['LARK_APP_SECRET'],
+       'open_id': os.environ['LARK_OPEN_ID'], 'events': ['Stop', 'Notification']}
+with open(os.environ['LARK_CONFIG_FILE'], 'w') as f: json.dump(cfg, f, indent=4)
 "
 chmod 600 "$CONFIG_FILE"
 ok "配置已保存  $CONFIG_FILE"
