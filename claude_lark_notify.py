@@ -141,7 +141,14 @@ def _parse_transcript(path: str) -> dict:
 
                 if record_type == "user":
                     stats["total_turns"] += 1
-                    if ts and obj.get("userType") == "external":
+                    # Only track REAL user messages (not tool results)
+                    # Tool results have "toolUseResult" key; actual human
+                    # messages have "permissionMode" and no "toolUseResult"
+                    is_real_user = (
+                        obj.get("userType") == "external"
+                        and "toolUseResult" not in obj
+                    )
+                    if ts and is_real_user:
                         stats["last_user_ts"] = ts
                         stats["turn_agents"] = []  # reset per turn
 
