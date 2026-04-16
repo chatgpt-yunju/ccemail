@@ -1,7 +1,9 @@
 {
-    "app_id": "cli_xxx",
-    "app_secret": "your_app_secret_here",
-    "open_id": "ou_your_open_id_here",
+    "smtp_server": "smtp.qq.com",
+    "smtp_port": 465,
+    "smtp_username": "your_email@qq.com",
+    "smtp_password": "your_auth_code",
+    "to_email": "2743319061@qq.com",
     "events": ["Stop", "Notification"],
     "min_duration": 0,
     "quiet_hours": null

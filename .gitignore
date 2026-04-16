@@ -6,6 +6,10 @@ checkpoints/
 team-configs/
 docs/team-quickstart.md
 
+# Node.js
+node_modules/
+package-lock.json
+
 # Python
 __pycache__/
 *.py[cod]
