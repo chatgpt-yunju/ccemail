@@ -173,6 +173,10 @@ claude-email/
 - [Claude Code](https://claude.ai/claude-code) CLI
 - 支持 SMTP 的邮箱账户
 
+## 作者
+
+微信：19966519194
+
 ## License
 
 MIT
